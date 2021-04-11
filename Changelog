@@ -1,7 +1,7 @@
 hqdn3d 1.0.0 (2021-4-12):
 Add parameters y, u, v.
-Add support for all YUV formats.
-Add support for 10..16-bit formats.
+Add support for all YUV planar formats.
+Add support for 10..16-bit planar formats.
 Reduce intermediate precision - faster code, negligible change to output.
 Add Linux building option.
 Add version.
