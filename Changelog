@@ -1,0 +1,5 @@
+hqdn3d 0.11 (2005-1-25):
+Fix a floating-point exception.
+
+hqdn3d 0.10 (2004-10-25):
+Initial release.

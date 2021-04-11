@@ -1,6 +1,8 @@
 /*
+    HQDN3D 0.11 for Avisynth
+
     Copyright (C) 2003 Daniel Moreno <comac@comac.darktech.org>
-	Avisynth port by Loren Merritt <lorenm@u.washington.edu>
+    Avisynth port (C) 2005 Loren Merritt <lorenm@u.washington.edu>
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -18,9 +20,6 @@
 */
 
 #include "internal.h"
-
-#define MYVERSION "0.1"
-#define VERSION_PRINTF "hqdn3d %s by Loren Merritt, Copyright 2004\n", MYVERSION
 
 
 static inline unsigned int LowPassMul(unsigned int PrevMul, unsigned int CurrMul, int* Coef){
@@ -89,7 +88,7 @@ static void PrecalcCoefs(int *Ct, double Dist25)
 
 	Gamma = log(0.25) / log(1.0 - Dist25/255.0 - 0.00001);
 
-	for (i = -256*16; i < 256*16; i++)
+	for (i = -255*16; i < 256*16; i++)
 	{
 		Simil = 1.0 - ABS(i) / (16*255.0);
 		C = pow(Simil, Gamma) * 65536.0 * (double)i / 16.0;

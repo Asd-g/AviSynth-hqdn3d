@@ -1,4 +1,4 @@
-HQDN3D 0.1 by Loren Merritt, Copyright 2004.
+HQDN3D 0.11 by Loren Merritt, Copyright 2005.
 Based on the MPlayer filter with the same name, by Daniel Moreno.
 
 High Quality DeNoise 3D is an Avisynth 2.5 filter.

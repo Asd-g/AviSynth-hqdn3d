@@ -103,7 +103,7 @@ SOURCE=.\avisynth.h
 # End Source File
 # Begin Source File
 
-SOURCE=.\info.h
+SOURCE=.\internal.h
 # End Source File
 # End Group
 # Begin Group "Resource Files"
