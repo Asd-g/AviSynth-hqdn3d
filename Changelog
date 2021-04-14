@@ -1,3 +1,6 @@
+hqdn3d 1.0.1 (2021-4-15):
+Set MT mode: MT_MULTI_INSTANCE.
+
 hqdn3d 1.0.0 (2021-4-12):
 Add parameters y, u, v.
 Add support for all YUV planar formats.

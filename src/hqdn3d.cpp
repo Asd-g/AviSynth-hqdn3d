@@ -50,6 +50,10 @@ class hqdn3d : public GenericVideoFilter
 
 public:
     hqdn3d(PClip _child, double LumSpac, double ChromSpac, double LumTmp, double ChromTmp, int restart, int y, int u, int v, IScriptEnvironment* env);
+    int __stdcall SetCacheHints(int cachehints, int frame_range) override
+    {
+        return cachehints == CACHE_GET_MTMODE ? MT_MULTI_INSTANCE : 0;
+    }
     ~hqdn3d();
     PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
 };
