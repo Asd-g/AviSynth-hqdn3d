@@ -72,8 +72,8 @@ Use solution files.
 - CMake >= 3.16
 
 ```
-git clone https://github.com/Asd-g/hqdn3d && \
-cd hqdn3d && \
+git clone https://github.com/Asd-g/AviSynth-hqdn3d && \
+cd AviSynth-hqdn3d && \
 mkdir build && \
 cd build && \
 cmake .. && \
