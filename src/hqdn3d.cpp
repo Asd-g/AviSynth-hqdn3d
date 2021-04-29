@@ -22,9 +22,9 @@
 
 #include "avisynth.h"
 
-typedef union {
+typedef struct
+{
     uint16_t u16;
-    uint8_t  u8[2];
 } av_alias;
 
 #define AV_RN16A(p) (((const av_alias*)(p))->u16)
