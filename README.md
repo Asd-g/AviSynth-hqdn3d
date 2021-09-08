@@ -1,16 +1,22 @@
-# Description
+## Description
 
 High Quality DeNoise 3D is an AviSynth port of the MPlayer filter of the same name. It performs a 3-way low-pass filter, which can completely remove high-frequency noise while minimizing blending artifacts.
 
 High bit depth support ported from the ffmpeg plugin.
 
-# Usage
+### Requirements:
+
+- AviSynth 2.60 / AviSynth+ 3.4 or later
+
+- Microsoft VisualC++ Redistributable Package 2022 (can be downloaded from [here](https://github.com/abbodi1406/vcredist/releases))
+
+### Usage:
 
 ```
 hqdn3d (clip input, float "ls", float "cs", float "lt", float "ct", int "restart", int "y", int "u", int "v")
 ```
 
-## Parameters:
+### Parameters:
 
 - input\
     A clip to process.\
@@ -57,26 +63,24 @@ hqdn3d (clip input, float "ls", float "cs", float "lt", float "ct", int "restart
     3: Process plane.\
     Default: y = u = v = 3.
     
-# Building
+### Building:
 
-## Windows
+- Windows\
+    Use solution files.
 
-Use solution files.
-
-## Linux
-
-### Requirements
-
-- Git
-- C++11 compiler
-- CMake >= 3.16
-
-```
-git clone https://github.com/Asd-g/AviSynth-hqdn3d && \
-cd AviSynth-hqdn3d && \
-mkdir build && \
-cd build && \
-cmake .. && \
-make -j$(nproc) && \
-sudo make install
-```
+- Linux
+    ```
+    Requirements:
+        - Git
+        - C++11 compiler
+        - CMake >= 3.16
+    ```
+    ```
+    git clone https://github.com/Asd-g/AviSynth-hqdn3d && \
+    cd AviSynth-hqdn3d && \
+    mkdir build && \
+    cd build && \
+    cmake .. && \
+    make -j$(nproc) && \
+    sudo make install
+    ```
