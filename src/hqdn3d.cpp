@@ -71,6 +71,9 @@ static inline void denoise_temporal(const uint8_t* src, uint8_t* dst, uint16_t* 
 
     temporal += 256 << LUT_BITS;
 
+    if (depth != 8)
+        w /= 2;
+
     for (y = 0; y < h; ++y)
     {
         for (x = 0; x < w; ++x)
@@ -94,6 +97,9 @@ static inline void denoise_spatial(const uint8_t* src, uint8_t* dst, uint16_t* l
     spatial += 256 << LUT_BITS;
     temporal += 256 << LUT_BITS;
 
+    if (depth != 8)
+        w /= 2;
+
     /* First line has no top neighbor. Only left one for each tmp and
      * last frame */
     pixel_ant = LOAD(0);
@@ -103,8 +109,6 @@ static inline void denoise_spatial(const uint8_t* src, uint8_t* dst, uint16_t* l
         frame_ant[x] = tmp = lowpass(frame_ant[x], tmp, temporal, depth);
         STORE(x, tmp);
     }
-
-    w /= (depth == 8) ? 1 : 2;
 
     for (y = 1; y < h; ++y)
     {
@@ -164,7 +168,7 @@ static void precalc_coefs(double dist25, int depth, int16_t* ct)
 
     gamma = log(0.25) / log(1.0 - std::min(dist25, 252.0) / 255.0 - 0.00001);
 
-    for (i = -256 << LUT_BITS; i < 256 << LUT_BITS; ++i)
+    for (i = -(256 << LUT_BITS); i < 256 << LUT_BITS; ++i)
     {
         double f = ((i << (9 - LUT_BITS)) + (1 << (8 - LUT_BITS)) - 1) / 512.0; // midpoint of the bin
         simil = std::max(0.0, 1.0 - fabs(f) / 255.0);
@@ -203,7 +207,7 @@ hqdn3d::hqdn3d(PClip _child, double LumSpac, double ChromSpac, double LumTmp, do
             default: process[i] = 1; break;
         }
     }
-    
+
     planecount = std::min(vi.NumComponents(), 3);
     const int planes[3] = { PLANAR_Y, PLANAR_U, PLANAR_V };
 
@@ -230,7 +234,7 @@ hqdn3d::hqdn3d(PClip _child, double LumSpac, double ChromSpac, double LumTmp, do
     {
         coefs[i] = new int16_t[512 << LUT_BITS];
         precalc_coefs(strength[i], depth, coefs[i]);
-    }       
+    }
 
     has_at_least_v8 = true;
     try { env->CheckVersion(8); }
@@ -296,7 +300,7 @@ PVideoFrame __stdcall hqdn3d::GetFrame(int n, IScriptEnvironment* env)
             filterFrame(src, env);
         }
     }
-    
+
     prev_frame = n;
     PVideoFrame src = child->GetFrame(n, env);
     cache = filterFrame(src, env);
