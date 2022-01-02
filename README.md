@@ -13,7 +13,7 @@ High bit depth support ported from the ffmpeg plugin.
 ### Usage:
 
 ```
-hqdn3d (clip input, float "ls", float "cs", float "lt", float "ct", int "restart", int "y", int "u", int "v")
+hqdn3d (clip input, float "ls", float "cs", float "lt", float "ct", int "restart", int "y", int "u", int "v", bool "mt")
 ```
 
 ### Parameters:
@@ -21,14 +21,14 @@ hqdn3d (clip input, float "ls", float "cs", float "lt", float "ct", int "restart
 - input\
     A clip to process.\
     It must be in YUV 8..16-bit planar format.
-    
+
 - ls\
     Spatial luma strength.\
     Increasing the value will improve the smoothing but may overblur.\
     Anything above about 10 is probably not a good idea.\
     Must be between 0.0..255.0.\
     Default: 4.0.
-    
+
 - cs\
     Spatial chroma strength.\
     Increasing the value will improve the smoothing but may overblur.\
@@ -42,27 +42,31 @@ hqdn3d (clip input, float "ls", float "cs", float "lt", float "ct", int "restart
     Anything above about 13 is probably not a good idea.\
     Must be between 0.0..255.0.\
     Default: 6.0 \* ls / 4.0.
-    
+
 - ct\
     Chroma temporal strength.\
     Increasing the values will improve the smoothing but may cause ghosting.\
     Anything above about 13 is probably not a good idea.\
     Must be between 0.0..255.0.\
     Default: lt \* cs / ls.
-    
+
 - restart\
     Whenever a frame is requested out of order, restart filtering this many frames before.\
     While seeking still slightly affects the content of the frames returned, this should reduce the disturbance to an unnoticeable level.\
     Must be non-negative value.
     Default: max(2, 1 + max(lt, ct)).
-    
+
 - y, u, v\
     Planes to process.\
     1: Return garbage.\
     2: Copy plane.\
     3: Process plane.\
     Default: y = u = v = 3.
-    
+
+- mt\
+    Whether to process the planes in parallel.\
+    Default: False.
+
 ### Building:
 
 - Windows\
@@ -72,7 +76,7 @@ hqdn3d (clip input, float "ls", float "cs", float "lt", float "ct", int "restart
     ```
     Requirements:
         - Git
-        - C++11 compiler
+        - C++17 compiler
         - CMake >= 3.16
     ```
     ```

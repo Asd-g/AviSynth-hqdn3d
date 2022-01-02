@@ -1,3 +1,8 @@
+hqdn3d 1.1.0 (2022-01-03):
+Fixed bug if the frame processing is out of sequence.
+Improved the speed by ~20% (mt=false).
+Added parameter mt.
+
 hqdn3d 1.0.2 (2021-12-17):
 Fixed crash when the clip is high bit depth and cs=0.
 Fixed garbage second row when the clip is high bit depth.

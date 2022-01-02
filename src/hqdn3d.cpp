@@ -19,67 +19,55 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
+#include <vector>
+#include <execution>
 
 #include "avisynth.h"
 
-typedef struct
-{
-    uint16_t u16;
-} av_alias;
-
-#define AV_RN16A(p) (((const av_alias*)(p))->u16)
-#define AV_WN16A(p, v) (((av_alias*)(p))->u16 = (v))
-
-#define LUT_BITS (depth==16 ? 8 : 4)
-#define LOAD(x) (((depth == 8 ? src[x] : AV_RN16A(src + (x) * 2)) << (16 - depth)) + (((1 << (16 - depth)) - 1) >> 1))
-#define STORE(x,val) (depth == 8 ? dst[x] = (val) >> (16 - depth) : AV_WN16A(dst + (x) * 2, (val) >> (16 - depth)))
-
 class hqdn3d : public GenericVideoFilter
 {
-    int16_t* coefs[4];
-    uint16_t* line[3];
-    uint16_t* frame_prev[3];
-    int planecount;
+    std::unique_ptr<int16_t[]> coefs[4];
+    std::unique_ptr<uint16_t[]> line[3];
+    std::unique_ptr<uint16_t[]> frame_prev[3];
     int process[3];
     bool has_at_least_v8;
-    int _restartlap;
-    int prev_frame = -99999;
+    int restartlap;
+    int prev_frame;
     PVideoFrame cache;
 
-    PVideoFrame filterFrame(PVideoFrame& src, IScriptEnvironment* env);
+    template <typename T, int depth, int LUT_BITS, bool mt>
+    PVideoFrame filterFrame(PVideoFrame src, IScriptEnvironment* env);
+
+    PVideoFrame(hqdn3d::* filter)(PVideoFrame src, IScriptEnvironment* env);
 
 public:
-    hqdn3d(PClip _child, double LumSpac, double ChromSpac, double LumTmp, double ChromTmp, int restart, int y, int u, int v, IScriptEnvironment* env);
+    hqdn3d(PClip _child, double LumSpac, double ChromSpac, double LumTmp, double ChromTmp, int restart_, int y, int u, int v, bool mt, IScriptEnvironment* env);
     int __stdcall SetCacheHints(int cachehints, int frame_range) override
     {
-        return cachehints == CACHE_GET_MTMODE ? MT_MULTI_INSTANCE : 0;
+        return cachehints == CACHE_GET_MTMODE ? MT_SERIALIZED : 0;
     }
-    ~hqdn3d();
-    PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
+    PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env) override;
 };
 
-static inline uint32_t lowpass(int prev, int cur, int16_t* coef, int depth)
+template <int LUT_BITS>
+AVS_FORCEINLINE uint32_t lowpass(int prev, int cur, int16_t* coef)
 {
-    const int d = (prev - cur) >> (8 - LUT_BITS);
-    return cur + coef[d];
+    return cur + coef[(prev - cur) >> (8 - LUT_BITS)];
 }
 
-static inline void denoise_temporal(const uint8_t* src, uint8_t* dst, uint16_t* frame_ant, int w, int h, int sstride, int dstride, int16_t* temporal, int depth)
+template <typename T, int depth, int LUT_BITS>
+AVS_FORCEINLINE void denoise_temporal(const T* src, T* dst, uint16_t* frame_ant, int w, int h, int sstride, int dstride, int16_t* temporal)
 {
-    long x, y;
-    uint32_t tmp;
-
     temporal += 256 << LUT_BITS;
 
-    if (depth != 8)
-        w /= 2;
-
-    for (y = 0; y < h; ++y)
+    for (int y{ 0 }; y < h; ++y)
     {
-        for (x = 0; x < w; ++x)
+        for (int x{ 0 }; x < w; ++x)
         {
-            frame_ant[x] = tmp = lowpass(frame_ant[x], LOAD(x), temporal, depth);
-            STORE(x, tmp);
+            uint32_t tmp;
+            frame_ant[x] = tmp = lowpass<LUT_BITS>(frame_ant[x], (src[x] << (16 - depth)) + (((1 << (16 - depth)) - 1) >> 1), temporal);
+            dst[x] = tmp >> (16 - depth);
         }
 
         src += sstride;
@@ -88,103 +76,107 @@ static inline void denoise_temporal(const uint8_t* src, uint8_t* dst, uint16_t* 
     }
 }
 
-static inline void denoise_spatial(const uint8_t* src, uint8_t* dst, uint16_t* line_ant, uint16_t* frame_ant, int w, int h, int sstride, int dstride, int16_t* spatial, int16_t* temporal, int depth)
+template <typename T, int depth, int LUT_BITS>
+AVS_FORCEINLINE void denoise_spatial(const T* src, T* dst, uint16_t* line_ant, uint16_t* frame_ant, int w, int h, int sstride, int dstride, int16_t* spatial, int16_t* temporal)
 {
-    long x, y;
-    uint32_t pixel_ant;
     uint32_t tmp;
 
     spatial += 256 << LUT_BITS;
     temporal += 256 << LUT_BITS;
 
-    if (depth != 8)
-        w /= 2;
-
     /* First line has no top neighbor. Only left one for each tmp and
      * last frame */
-    pixel_ant = LOAD(0);
-    for (x = 0; x < w; ++x)
+    int pixel_ant{ (src[0] << (16 - depth)) + (((1 << (16 - depth)) - 1) >> 1) };
+    for (int x{ 0 }; x < w; ++x)
     {
-        line_ant[x] = tmp = pixel_ant = lowpass(pixel_ant, LOAD(x), spatial, depth);
-        frame_ant[x] = tmp = lowpass(frame_ant[x], tmp, temporal, depth);
-        STORE(x, tmp);
+        line_ant[x] = tmp = pixel_ant = lowpass<LUT_BITS>(pixel_ant, (src[x] << (16 - depth)) + (((1 << (16 - depth)) - 1) >> 1), spatial);
+        frame_ant[x] = tmp = lowpass<LUT_BITS>(frame_ant[x], tmp, temporal);
+        dst[x] = tmp >> (16 - depth);
     }
 
-    for (y = 1; y < h; ++y)
+    for (int y{ 1 }; y < h; ++y)
     {
         src += sstride;
         dst += dstride;
         frame_ant += w;
 
-        pixel_ant = LOAD(0);
+        int x;
+        pixel_ant = (src[0] << (16 - depth)) + (((1 << (16 - depth)) - 1) >> 1);
         for (x = 0; x < w - 1; ++x)
         {
-            line_ant[x] = tmp = lowpass(line_ant[x], pixel_ant, spatial, depth);
-            pixel_ant = lowpass(pixel_ant, LOAD(x + 1), spatial, depth);
-            frame_ant[x] = tmp = lowpass(frame_ant[x], tmp, temporal, depth);
-            STORE(x, tmp);
+            line_ant[x] = tmp = lowpass<LUT_BITS>(line_ant[x], pixel_ant, spatial);
+            pixel_ant = lowpass<LUT_BITS>(pixel_ant, (src[x + 1] << (16 - depth)) + (((1 << (16 - depth)) - 1) >> 1), spatial);
+            frame_ant[x] = tmp = lowpass<LUT_BITS>(frame_ant[x], tmp, temporal);
+            dst[x] = tmp >> (16 - depth);
         }
-        line_ant[x] = tmp = lowpass(line_ant[x], pixel_ant, spatial, depth);
-        frame_ant[x] = tmp = lowpass(frame_ant[x], tmp, temporal, depth);
-        STORE(x, tmp);
+        line_ant[x] = tmp = lowpass<LUT_BITS>(line_ant[x], pixel_ant, spatial);
+        frame_ant[x] = tmp = lowpass<LUT_BITS>(frame_ant[x], tmp, temporal);
+        dst[x] = tmp >> (16 - depth);
     }
 }
 
-static inline void denoise(const uint8_t* src, uint8_t* dst, uint16_t* line_ant, uint16_t** frame_ant_ptr, int w, int h, int sstride, int dstride, int16_t* spatial, int16_t* temporal, int depth)
+template <typename T, int depth, int LUT_BITS>
+AVS_FORCEINLINE void denoise(const T* src, T* dst, uint16_t* line_ant, uint16_t* frame_ant_ptr, int w, int h, int sstride, int dstride, int16_t* spatial, int16_t* temporal)
 {
     if (spatial[0])
-        denoise_spatial(src, dst, line_ant, *frame_ant_ptr, w, h, sstride, dstride, spatial, temporal, depth);
+        denoise_spatial<T, depth, LUT_BITS>(src, dst, line_ant, frame_ant_ptr, w, h, sstride, dstride, spatial, temporal);
     else
-        denoise_temporal(src, dst, *frame_ant_ptr, w, h, sstride, dstride, temporal, depth);
+        denoise_temporal<T, depth, LUT_BITS>(src, dst, frame_ant_ptr, w, h, sstride, dstride, temporal);
 }
 
-PVideoFrame hqdn3d::filterFrame(PVideoFrame& src, IScriptEnvironment* env)
+template <typename T, int depth, int LUT_BITS, bool mt>
+PVideoFrame hqdn3d::filterFrame(PVideoFrame src, IScriptEnvironment* env)
 {
-    PVideoFrame dst = (has_at_least_v8) ? env->NewVideoFrameP(vi, &src) : env->NewVideoFrame(vi);
-    const int planes[3] = { PLANAR_Y, PLANAR_U, PLANAR_V };
+    PVideoFrame dst{ (has_at_least_v8) ? env->NewVideoFrameP(vi, &src) : env->NewVideoFrame(vi) };
+    const int planes[3]{ PLANAR_Y, PLANAR_U, PLANAR_V };
+    const int planecount{ std::min(vi.NumComponents(), 3) };
 
-    for (int i = 0; i < planecount; ++i)
+    auto loop = [&](int i)
     {
-        const int pitch = src->GetPitch(planes[i]);
-        const int dst_pitch = dst->GetPitch(planes[i]);
-        const int width = src->GetRowSize(planes[i]);
-        const int height = src->GetHeight(planes[i]);
-        const uint8_t* srcp = src->GetReadPtr(planes[i]);
-        uint8_t* dstp = dst->GetWritePtr(planes[i]);
+        const int height{ src->GetHeight(planes[i]) };
 
         if (process[i] == 3)
-            denoise(srcp, dstp, line[i], &frame_prev[i], width, height, pitch, dst_pitch, coefs[(i) ? 2 : 0], coefs[(i) ? 3 : 1], vi.BitsPerComponent());
+            denoise<T, depth, LUT_BITS>(reinterpret_cast<const T*>(src->GetReadPtr(planes[i])), reinterpret_cast<T*>(dst->GetWritePtr(planes[i])), line[i].get(), frame_prev[i].get(), src->GetRowSize(planes[i]) / sizeof(T),
+                height, src->GetPitch(planes[i]) / sizeof(T), dst->GetPitch(planes[i]) / sizeof(T), coefs[(i) ? 2 : 0].get(), coefs[(i) ? 3 : 1].get());
         else if (process[i] == 2)
-            env->BitBlt(dstp, dst_pitch, srcp, pitch, width, height);
+            env->BitBlt(dst->GetWritePtr(planes[i]), dst->GetPitch(planes[i]), src->GetReadPtr(planes[i]), src->GetPitch(planes[i]), src->GetRowSize(planes[i]), height);
+    };
+
+    if constexpr (mt)
+    {
+        std::vector<int> l(planecount);
+        std::iota(std::begin(l), std::end(l), 0);
+        std::for_each(std::execution::par, std::begin(l), std::end(l), loop);
+    }
+    else
+    {
+        for (intptr_t i = 0; i < planecount; ++i)
+            loop(i);
     }
 
     return dst;
 }
 
-static void precalc_coefs(double dist25, int depth, int16_t* ct)
+template <int LUT_BITS>
+static void precalc_coefs(double dist25, int16_t* ct)
 {
-    int i;
-    double gamma, simil, C;
+    const double gamma{ log(0.25) / log(1.0 - std::min(dist25, 252.0) / 255.0 - 0.00001) };
 
-    gamma = log(0.25) / log(1.0 - std::min(dist25, 252.0) / 255.0 - 0.00001);
-
-    for (i = -(256 << LUT_BITS); i < 256 << LUT_BITS; ++i)
+    for (int i{ -(256 << LUT_BITS) }; i < 256 << LUT_BITS; ++i)
     {
-        double f = ((i << (9 - LUT_BITS)) + (1 << (8 - LUT_BITS)) - 1) / 512.0; // midpoint of the bin
-        simil = std::max(0.0, 1.0 - fabs(f) / 255.0);
-        C = pow(simil, gamma) * 256.0 * f;
-        ct[(256 << LUT_BITS) + i] = lrint(C);
+        const double f{ ((i << (9 - LUT_BITS)) + (1 << (8 - LUT_BITS)) - 1) / 512.0 }; // midpoint of the bin
+        ct[(256 << LUT_BITS) + i] = lrint(pow(std::max(0.0, 1.0 - fabs(f) / 255.0), gamma) * 256.0 * f);
     }
 
     ct[0] = !!dist25;
 }
 
-hqdn3d::hqdn3d(PClip _child, double LumSpac, double ChromSpac, double LumTmp, double ChromTmp, int restart, int y, int u, int v, IScriptEnvironment* env)
-    : GenericVideoFilter(_child), _restartlap(restart)
+hqdn3d::hqdn3d(PClip _child, double LumSpac, double ChromSpac, double LumTmp, double ChromTmp, int restart_, int y, int u, int v, bool mt, IScriptEnvironment* env)
+    : GenericVideoFilter(_child), restartlap(restart_)
 {
-    const int depth = vi.BitsPerComponent();
+    const int comp_size{ vi.ComponentSize() };
 
-    if (vi.IsRGB() || depth == 32 || !vi.IsPlanar())
+    if (vi.IsRGB() || comp_size == 4 || !vi.IsPlanar())
         env->ThrowError("hqdn3d: clip must be in YUV 8..16-bit planar format.");
     if (LumSpac < 0.0 || LumSpac > 255.0)
         env->ThrowError("hqdn3d: ls must be between 0.0..255.0.");
@@ -194,10 +186,10 @@ hqdn3d::hqdn3d(PClip _child, double LumSpac, double ChromSpac, double LumTmp, do
         env->ThrowError("hqdn3d: lt must be between 0.0..255.0.");
     if (ChromTmp < 0.0 || ChromTmp > 255.0)
         env->ThrowError("hqdn3d: ct must be between 0.0..255.0.");
-    if (_restartlap < 0)
+    if (restartlap < 0)
         env->ThrowError("hqdn3d: restart must be non-negative value.");
 
-    const int process_planes[3] = { y, u, v };
+    const int process_planes[3]{ y, u, v };
     for (int i = 0; i < 3; ++i)
     {
         switch (process_planes[i])
@@ -208,32 +200,77 @@ hqdn3d::hqdn3d(PClip _child, double LumSpac, double ChromSpac, double LumTmp, do
         }
     }
 
-    planecount = std::min(vi.NumComponents(), 3);
-    const int planes[3] = { PLANAR_Y, PLANAR_U, PLANAR_V };
+    const int planecount{ std::min(vi.NumComponents(), 3) };
 
-    for (int i = 0; i < planecount; ++i)
+    if (planecount > 1)
     {
-        if (process[i] == 3)
+        const int cw{ (process[1] == 3 || process[2] == 3) ? (vi.width >> vi.GetPlaneWidthSubsampling(PLANAR_U)) : 0 };
+        const int ch{ (process[1] == 3 || process[2] == 3) ? (vi.height >> vi.GetPlaneHeightSubsampling(PLANAR_U)) : 0 };
+
+        for (int i{ 0 }; i < planecount; ++i)
         {
-            line[i] = new uint16_t[((i) ? vi.width >> vi.GetPlaneWidthSubsampling(planes[i]) : vi.width) * vi.ComponentSize()];
-            frame_prev[i] = new uint16_t[((i) ? (vi.width >> vi.GetPlaneWidthSubsampling(planes[i])) * (vi.height >> vi.GetPlaneHeightSubsampling(planes[i])) : vi.width * vi.height) * vi.ComponentSize()];
-        }
-        else
-        {
-            line[i] = nullptr;
-            frame_prev[i] = nullptr;
+            if (process[i] == 3)
+            {
+                line[i] = std::make_unique<uint16_t[]>(((i) ? cw : vi.width) * comp_size);
+                frame_prev[i] = std::make_unique<uint16_t[]>(((i) ? (cw * ch) : (vi.width * vi.height)) * comp_size);
+            }
         }
     }
-
-    double strength[4] = { LumSpac = std::min(254.9, LumSpac),
-    LumTmp = std::min(254.9, LumTmp),
-    ChromSpac = std::min(254.9, ChromSpac),
-    ChromTmp = std::min(254.9, ChromTmp) };
-
-    for (int i = 0; i < 4; ++i)
+    else
     {
-        coefs[i] = new int16_t[512 << LUT_BITS];
-        precalc_coefs(strength[i], depth, coefs[i]);
+        line[0] = std::make_unique<uint16_t[]>(vi.width * comp_size);
+        frame_prev[0] = std::make_unique<uint16_t[]>(vi.width * vi.height * comp_size);
+    }
+
+    prev_frame = -99999;
+    const double strength[4]{ std::min(254.9, LumSpac), std::min(254.9, LumTmp), std::min(254.9, ChromSpac), std::min(254.9, ChromTmp) };
+
+    switch (comp_size)
+    {
+        case 2:
+        {
+            for (int i{ 0 }; i < 4; ++i)
+            {
+                coefs[i] = std::make_unique<int16_t[]>(512 << 8);
+                precalc_coefs<8>(strength[i], coefs[i].get());
+            }
+
+            if (mt)
+            {
+                switch (vi.BitsPerComponent())
+                {
+                    case 16: filter = &hqdn3d::filterFrame<uint16_t, 16, 8, true>; break;
+                    case 14: filter = &hqdn3d::filterFrame<uint16_t, 14, 8, true>; break;
+                    case 12: filter = &hqdn3d::filterFrame<uint16_t, 12, 8, true>; break;
+                    case 10: filter = &hqdn3d::filterFrame<uint16_t, 10, 8, true>; break;
+                }
+            }
+            else
+            {
+                switch (vi.BitsPerComponent())
+                {
+                    case 16: filter = &hqdn3d::filterFrame<uint16_t, 16, 8, false>; break;
+                    case 14: filter = &hqdn3d::filterFrame<uint16_t, 14, 8, false>; break;
+                    case 12: filter = &hqdn3d::filterFrame<uint16_t, 12, 8, false>; break;
+                    case 10: filter = &hqdn3d::filterFrame<uint16_t, 10, 8, false>; break;
+                }
+            }
+            break;
+        }
+        default:
+        {
+            for (int i{ 0 }; i < 4; ++i)
+            {
+                coefs[i] = std::make_unique<int16_t[]>(512 << 4);
+                precalc_coefs<4>(strength[i], coefs[i].get());
+            }
+
+            if (mt)
+                filter = &hqdn3d::filterFrame<uint8_t, 8, 4, true>;
+            else
+                filter = &hqdn3d::filterFrame<uint8_t, 8, 4, false>;
+            break;
+        }
     }
 
     has_at_least_v8 = true;
@@ -241,79 +278,79 @@ hqdn3d::hqdn3d(PClip _child, double LumSpac, double ChromSpac, double LumTmp, do
     catch (const AvisynthError&) { has_at_least_v8 = false; };
 }
 
-hqdn3d::~hqdn3d()
-{
-    for (int i = 0; i < 4; ++i)
-        delete[] coefs[i];
-
-    for (int i = 0; i < planecount; ++i)
-    {
-        if (process[i] == 3)
-        {
-            delete[] frame_prev[i];
-            delete[] line[i];
-        }
-    }
-}
-
 PVideoFrame __stdcall hqdn3d::GetFrame(int n, IScriptEnvironment* env)
 {
     if (n == prev_frame)
         return cache;
     // if we skip some frames, filter the gap anyway
-    if (n > prev_frame + 1 && n - prev_frame <= _restartlap + 1 && prev_frame >= 0)
+    if (n > prev_frame + 1 && n - prev_frame <= restartlap + 1 && prev_frame >= 0)
     {
-        for (int i = prev_frame + 1; i < n; ++i)
-        {
-            PVideoFrame src = child->GetFrame(i, env);
-            filterFrame(src, env);
-        }
+        for (int i{ prev_frame + 1 }; i < n; ++i)
+            (this->*filter)(child->GetFrame(i, env), env);
     }
     // if processing out of sequence, filter several previous frames to minimize seeking problems
     else if (n == 0 || n != prev_frame + 1)
     {
-        const int sn = std::max(0, n - _restartlap);
-        PVideoFrame sf = child->GetFrame(sn, env);
-        const int planes[3] = { PLANAR_Y, PLANAR_U, PLANAR_V };
+        const int sn{ std::max(0, n - restartlap) };
+        PVideoFrame sf{ child->GetFrame(sn, env) };
+        const int planes[3]{ PLANAR_Y, PLANAR_U, PLANAR_V };
+        const int planecount{ std::min(vi.NumComponents(), 3) };
 
-        for (int i = 0; i < planecount; ++i)
+        if (vi.ComponentSize() == 1)
         {
-
-            const int sStride = sf->GetPitch(planes[i]);
-            const int w = sf->GetRowSize(planes[i]);
-            const int h = sf->GetHeight(planes[i]);
-            const uint8_t* srcp = sf->GetReadPtr(planes[i]);
-
-            for (int y = 0; y < h; ++y)
+            for (int i{ 0 }; i < planecount; ++i)
             {
-                const uint8_t* src = srcp + y * sStride;
-                uint16_t* dst = &frame_prev[0][y * w];
+                const int sStride{ sf->GetPitch(planes[i]) };
+                const int w{ sf->GetRowSize(planes[i]) };
+                const int h{ sf->GetHeight(planes[i]) };
+                const uint8_t* srcp{ sf->GetReadPtr(planes[i]) };
 
-                for (int x = 0; x < w; ++x)
-                    dst[x] = src[x] << 8;
+                for (int y{ 0 }; y < h; ++y)
+                {
+                    const uint8_t* src{ srcp + y * sStride };
+                    uint16_t* dst{ &frame_prev[i][y * w] };
+
+                    for (int x{ 0 }; x < w; ++x)
+                        dst[x] = src[x] << 8;
+                }
+            }
+        }
+        else
+        {
+            for (int i{ 0 }; i < planecount; ++i)
+            {
+                const int sStride{ sf->GetPitch(planes[i]) / vi.ComponentSize() };
+                const int w{ sf->GetRowSize(planes[i]) / vi.ComponentSize() };
+                const int h{ sf->GetHeight(planes[i]) };
+                const uint16_t* srcp{ reinterpret_cast<const uint16_t*>(sf->GetReadPtr(planes[i])) };
+
+                for (int y{ 0 }; y < h; ++y)
+                {
+                    const uint16_t* src{ srcp + y * sStride };
+                    uint16_t* dst{ &frame_prev[i][y * w] };
+
+                    for (int x{ 0 }; x < w; ++x)
+                        dst[x] = src[x] << (16 - vi.BitsPerComponent());
+                }
             }
         }
 
-        for (int i = sn + 1; i < n; ++i)
-        {
-            PVideoFrame src = child->GetFrame(i, env);
-            filterFrame(src, env);
-        }
+        for (int i{ sn + 1 }; i < n; ++i)
+            (this->*filter)(child->GetFrame(i, env), env);
     }
 
     prev_frame = n;
-    PVideoFrame src = child->GetFrame(n, env);
-    cache = filterFrame(src, env);
+    cache = (this->*filter)(child->GetFrame(n, env), env);
 
     return cache;
 }
 
 AVSValue __cdecl Create_hqdn3d(AVSValue args, void* user_data, IScriptEnvironment* env)
 {
-    const float ls = args[1].AsFloatf(4.0f);
-    const float cs = args[2].AsFloatf(3.0f * ls / 4.0f);
-    const float lt = args[3].AsFloatf(6.0f * ls / 4.0f);
-    const float ct = args[4].AsFloatf(lt * cs / ls);
+    const double ls{ args[1].AsFloatf(4.0f) };
+    const double cs{ args[2].AsFloatf(3.0f * ls / 4.0f) };
+    const double lt{ args[3].AsFloatf(6.0f * ls / 4.0f) };
+    const double ct{ args[4].AsFloatf(lt * cs / ls) };
 
     return new hqdn3d(
         args[0].AsClip(),
@@ -325,6 +362,7 @@ AVSValue __cdecl Create_hqdn3d(AVSValue args, void* user_data, IScriptEnvironmen
         args[6].AsInt(3),
         args[7].AsInt(3),
         args[8].AsInt(3),
+        args[9].AsBool(false),
         env);
 }
 
@@ -335,6 +373,6 @@ const char* __stdcall AvisynthPluginInit3(IScriptEnvironment * env, const AVS_Li
 {
     AVS_linkage = vectors;
 
-    env->AddFunction("hqdn3d", "c[ls]f[cs]f[lt]f[ct]f[restart]i[y]i[u]i[v]i", Create_hqdn3d, 0);
+    env->AddFunction("hqdn3d", "c[ls]f[cs]f[lt]f[ct]f[restart]i[y]i[u]i[v]i[mt]b", Create_hqdn3d, 0);
     return 0;
 }
