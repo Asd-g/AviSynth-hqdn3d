@@ -1,11 +1,12 @@
 hqdn3d 1.1.0 (2022-01-03):
-Fixed bug if the frame processing is out of sequence.
-Improved the speed by ~20% (mt=false).
-Added parameter mt.
+Fix bug if the frame processing is out of sequence.
+Improve the speed by ~20% (mt=false).
+Add parameter mt.
+Change the MT mode to MT_SERIALIZED.
 
 hqdn3d 1.0.2 (2021-12-17):
-Fixed crash when the clip is high bit depth and cs=0.
-Fixed garbage second row when the clip is high bit depth.
+Fix crash when the clip is high bit depth and cs=0.
+Fix garbage second row when the clip is high bit depth.
 
 hqdn3d 1.0.1 (2021-4-15):
 Set MT mode: MT_MULTI_INSTANCE.
