@@ -1,3 +1,6 @@
+hqdn3d 1.1.1 (2022-02-12):
+Fix the crashing when u/v = 1/2.
+
 hqdn3d 1.1.0 (2022-01-03):
 Fix bug if the frame processing is out of sequence.
 Improve the speed by ~20% (mt=false).

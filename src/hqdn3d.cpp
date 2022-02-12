@@ -165,7 +165,7 @@ static void precalc_coefs(double dist25, int16_t* ct)
     for (int i{ -(256 << LUT_BITS) }; i < 256 << LUT_BITS; ++i)
     {
         const double f{ ((i << (9 - LUT_BITS)) + (1 << (8 - LUT_BITS)) - 1) / 512.0 }; // midpoint of the bin
-        ct[(256 << LUT_BITS) + i] = lrint(pow(std::max(0.0, 1.0 - fabs(f) / 255.0), gamma) * 256.0 * f);
+        ct[(256 << LUT_BITS) + i] = static_cast<int16_t>(lrint(pow(std::max(0.0, 1.0 - fabs(f) / 255.0), gamma) * 256.0 * f));
     }
 
     ct[0] = !!dist25;
@@ -300,18 +300,21 @@ PVideoFrame __stdcall hqdn3d::GetFrame(int n, IScriptEnvironment* env)
         {
             for (int i{ 0 }; i < planecount; ++i)
             {
-                const int sStride{ sf->GetPitch(planes[i]) };
-                const int w{ sf->GetRowSize(planes[i]) };
-                const int h{ sf->GetHeight(planes[i]) };
-                const uint8_t* srcp{ sf->GetReadPtr(planes[i]) };
-
-                for (int y{ 0 }; y < h; ++y)
+                if (process[i] == 3)
                 {
-                    const uint8_t* src{ srcp + y * sStride };
-                    uint16_t* dst{ &frame_prev[i][y * w] };
+                    const int sStride{ sf->GetPitch(planes[i]) };
+                    const int w{ sf->GetRowSize(planes[i]) };
+                    const int h{ sf->GetHeight(planes[i]) };
+                    const uint8_t* srcp{ sf->GetReadPtr(planes[i]) };
 
-                    for (int x{ 0 }; x < w; ++x)
-                        dst[x] = src[x] << 8;
+                    for (int y{ 0 }; y < h; ++y)
+                    {
+                        const uint8_t* src{ srcp + y * sStride };
+                        uint16_t* dst{ &frame_prev[i][y * w] };
+
+                        for (int x{ 0 }; x < w; ++x)
+                            dst[x] = src[x] << 8;
+                    }
                 }
             }
         }
@@ -319,18 +322,21 @@ PVideoFrame __stdcall hqdn3d::GetFrame(int n, IScriptEnvironment* env)
         {
             for (int i{ 0 }; i < planecount; ++i)
             {
-                const int sStride{ sf->GetPitch(planes[i]) / vi.ComponentSize() };
-                const int w{ sf->GetRowSize(planes[i]) / vi.ComponentSize() };
-                const int h{ sf->GetHeight(planes[i]) };
-                const uint16_t* srcp{ reinterpret_cast<const uint16_t*>(sf->GetReadPtr(planes[i])) };
-
-                for (int y{ 0 }; y < h; ++y)
+                if (process[i] == 3)
                 {
-                    const uint16_t* src{ srcp + y * sStride };
-                    uint16_t* dst{ &frame_prev[i][y * w] };
+                    const int sStride{ sf->GetPitch(planes[i]) / vi.ComponentSize() };
+                    const int w{ sf->GetRowSize(planes[i]) / vi.ComponentSize() };
+                    const int h{ sf->GetHeight(planes[i]) };
+                    const uint16_t* srcp{ reinterpret_cast<const uint16_t*>(sf->GetReadPtr(planes[i])) };
 
-                    for (int x{ 0 }; x < w; ++x)
-                        dst[x] = src[x] << (16 - vi.BitsPerComponent());
+                    for (int y{ 0 }; y < h; ++y)
+                    {
+                        const uint16_t* src{ srcp + y * sStride };
+                        uint16_t* dst{ &frame_prev[i][y * w] };
+
+                        for (int x{ 0 }; x < w; ++x)
+                            dst[x] = src[x] << (16 - vi.BitsPerComponent());
+                    }
                 }
             }
         }
@@ -347,10 +353,10 @@ PVideoFrame __stdcall hqdn3d::GetFrame(int n, IScriptEnvironment* env)
 
 AVSValue __cdecl Create_hqdn3d(AVSValue args, void* user_data, IScriptEnvironment* env)
 {
-    const double ls{ args[1].AsFloatf(4.0f) };
-    const double cs{ args[2].AsFloatf(3.0f * ls / 4.0f) };
-    const double lt{ args[3].AsFloatf(6.0f * ls / 4.0f) };
-    const double ct{ args[4].AsFloatf(lt * cs / ls) };
+    const double ls{ args[1].AsFloat(4.0f) };
+    const double cs{ args[2].AsFloat(static_cast<float>(3.0f * ls / 4.0f)) };
+    const double lt{ args[3].AsFloat(static_cast<float>(6.0f * ls / 4.0f)) };
+    const double ct{ args[4].AsFloat(static_cast<float>(lt * cs / ls)) };
 
     return new hqdn3d(
         args[0].AsClip(),
@@ -358,7 +364,7 @@ AVSValue __cdecl Create_hqdn3d(AVSValue args, void* user_data, IScriptEnvironmen
         cs,
         lt,
         ct,
-        args[5].AsInt(std::max(2LL, llrint(1.0 + std::max(lt, ct)))),
+        args[5].AsInt(std::max(2, static_cast<int>(llrint(1.0 + std::max(lt, ct))))),
         args[6].AsInt(3),
         args[7].AsInt(3),
         args[8].AsInt(3),
